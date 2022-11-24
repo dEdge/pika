@@ -22,6 +22,61 @@
 
 #include "include/pika_conf.h"
 
+#include <chrono>
+
+class RateLimiter {
+  // not thread safe!!!
+private:
+  using time_point = std::chrono::time_point<std::chrono::system_clock>;
+  using ms = std::chrono::microseconds;
+  using second = std::chrono::seconds;
+  const int cap_;
+  // std::time_t last_tt_;
+
+  time_point last_tt_;
+  int current_;
+
+  template <typename precision> static time_point now() {
+    return std::chrono::time_point_cast<precision>(
+        std::chrono::system_clock::now());
+  };
+
+  void refill(time_point t = now<second>()) {
+    last_tt_ = t;
+    current_ = cap_;
+  }
+
+  void consume(int count) { current_ -= count; }
+
+  void block(time_point t = now<ms>()) {
+    long t_ms = std::chrono::duration_cast<ms>(t.time_since_epoch()).count();
+
+    long next_align_s = (long(t_ms / 1000) + 1) * 1000 + 1;
+    std::this_thread::sleep_for(ms(next_align_s - t_ms));
+  }
+
+public:
+  RateLimiter(int capacity)
+      : cap_(capacity), last_tt_(now<second>()), current_(cap_){};
+
+  void Limit(int count = 1) {
+    while (true) {
+      auto now_point = now<second>();
+      if (now_point != last_tt_) {
+        refill(now_point);
+        consume(count);
+        break;
+      } else if (current_ >= count) {
+        consume(count);
+        break;
+        ;
+      } else {
+        block();
+      }
+    }
+  }
+};
+
 const int64_t MAX_BATCH_NUM = 30000;
 
 extern PikaConf* g_pika_conf;
@@ -48,10 +103,18 @@ void MigratorThread::MigrateStringsDB() {
   std::vector<std::string> keys;
   std::map<blackwidow::DataType, int64_t> type_timestamp;
   std::map<blackwidow::DataType, rocksdb::Status> type_status;
+  
+  auto use_setnx = g_pika_conf->sync_use_setnx();
+  auto rate_limit = g_pika_conf->sync_rate_limit();
+  
+  RateLimiter rl { rate_limit };
   while (true) {
     cursor = bw->Scan(blackwidow::DataType::kStrings, cursor, "*", scan_batch_num, &keys);
 
     for (const auto& key : keys) {
+      if (rate_limit > 0) {
+        rl.Limit();
+      }
       s = bw->Get(key, &value);
       if (!s.ok()) {
         LOG(WARNING) << "get " << key << " error: " << s.ToString();
@@ -61,10 +124,6 @@ void MigratorThread::MigrateStringsDB() {
       pink::RedisCmdArgsType argv;
       std::string cmd;
 
-      argv.push_back("SET");
-      argv.push_back(key);
-      argv.push_back(value);
-
       ttl = -1;
       type_status.clear();
       type_timestamp = bw->TTL(key, &type_status);
@@ -72,14 +131,37 @@ void MigratorThread::MigrateStringsDB() {
         ttl = type_timestamp[blackwidow::kStrings];
       }
 
-      if (ttl > 0) {
-        argv.push_back("EX");
-        argv.push_back(std::to_string(ttl));
+      if (!use_setnx) {
+        argv.push_back("SET");
+        argv.push_back(key);
+        argv.push_back(value);
+        pink::SerializeRedisCommand(argv, &cmd);
+        if (ttl > 0) {
+          argv.push_back("EX");
+          argv.push_back(std::to_string(ttl));
+        }
+
+        DispatchKey(cmd, key);
+      } else {
+        argv.push_back("SETNX");
+        argv.push_back(key);
+        argv.push_back(value);
+        pink::SerializeRedisCommand(argv, &cmd);
+        DispatchKey(cmd, key);
+
+        if (ttl > 0) {
+          argv.clear();
+          argv.push_back("EXPIRE");
+          argv.push_back(key);
+          argv.push_back(std::to_string(ttl));
+
+          cmd.clear();
+          pink::SerializeRedisCommand(argv, &cmd);
+          DispatchKey(cmd, key);
+        }
       }
 
-      pink::SerializeRedisCommand(argv, &cmd);
       PlusNum();
-      DispatchKey(cmd, key);
     }
 
     if (!cursor) {

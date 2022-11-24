@@ -324,6 +324,9 @@ class PikaConf : public slash::BaseConf {
   std::string target_redis_pwd_;
   int sync_batch_num_;
   int redis_sender_num_;
+  
+  bool sync_use_setnx_;
+  int sync_rate_limit_;
 
   //
   // Critical configure items
@@ -335,6 +338,9 @@ class PikaConf : public slash::BaseConf {
   PikaMeta* local_meta_;
 
   pthread_rwlock_t rwlock_;
+public:
+  bool sync_use_setnx() const { return sync_use_setnx_; }
+  int sync_rate_limit() const { return sync_rate_limit_; }
 };
 
 #endif

@@ -108,8 +108,8 @@ LDFLAGS += $(LIB_PATH) \
 					 -lblackwidow$(DEBUG_SUFFIX) \
 					 -lrocksdb$(DEBUG_SUFFIX) \
 					 -lglog \
-					 -lprotobuf \
-					 -static-libstdc++ \
+					#  -lprotobuf \
+					 # -static-libstdc++ \
 
 # ---------------End Dependences----------------
 
@@ -145,7 +145,7 @@ am__v_CCLD_ = $(am__v_CCLD_$(AM_DEFAULT_VERBOSITY))
 am__v_CCLD_0 = @echo "  CCLD    " $(notdir $@);
 am__v_CCLD_1 =
 
-AM_LINK = $(AM_V_CCLD)$(CXX) $^ $(EXEC_LDFLAGS) -o $@ $(LDFLAGS)
+AM_LINK = $(AM_V_CCLD)$(CXX) $^ /usr/local/lib/libprotobuf.a $(EXEC_LDFLAGS) -o $@ $(LDFLAGS)
 
 CXXFLAGS += -g
 

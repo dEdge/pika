@@ -429,6 +429,12 @@ int PikaConf::Load()
 
   target_redis_host_ = "127.0.0.1";
   GetConfStr("target-redis-host", &target_redis_host_);
+  
+  sync_use_setnx_ = false;
+  GetConfBool("sync-use-setnx", &sync_use_setnx_);
+
+  sync_rate_limit_ = 0;
+  GetConfInt("sync-rate-limit", &sync_rate_limit_);
 
   target_redis_port_ = 6379;
   GetConfInt("target-redis-port", &target_redis_port_);
